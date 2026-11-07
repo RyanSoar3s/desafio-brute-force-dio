@@ -1,0 +1,17 @@
+1337
+admin
+administrator
+backup
+ftp
+gordonb
+guest
+klog
+msfadmin
+operator
+pablo
+postgres
+root
+service
+smithy
+sys
+user
